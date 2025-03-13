@@ -59,7 +59,7 @@ if ENV:
     ALLOW_EXCL = os.environ.get('ALLOW_EXCL', False)
 
 else:
-    from tg_bot.config import Development as Config
+    from tg_bot.sample_config import Config
     TOKEN = Config.API_KEY
     try:
         OWNER_ID = int(Config.OWNER_ID)
