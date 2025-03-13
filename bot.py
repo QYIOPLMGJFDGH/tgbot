@@ -1,5 +1,5 @@
 from telethon import TelegramClient, events, Button
-import sqlite3
+import psycopg2
 
 # अपने SQL डेटाबेस का URL यहाँ डालें
 DATABASE_URL = "postgres://kfcdtwea:jxgqtvc1ji7lSMjAhUp0QbxrE8Ut0t7N@fanny.db.elephantsql.com/kfcdtwea"
@@ -11,14 +11,14 @@ BOT_TOKEN = "8052771146:AAFQ_P-n9zOYdQqgU8uNsRMOlPx_GXrUy2Y"  # अपना ब
 
 client = TelegramClient('bot', API_ID, API_HASH).start(bot_token=BOT_TOKEN)
 
-# SQL Database Connection
-conn = sqlite3.connect(DATABASE_URL, check_same_thread=False)
+# SQL Database Connection (PostgreSQL)
+conn = psycopg2.connect(DATABASE_URL, sslmode="require")
 cursor = conn.cursor()
 
 # वेलकम मैसेज और बटन टेबल बनाना
 cursor.execute("""
 CREATE TABLE IF NOT EXISTS welcome_messages (
-    chat_id INTEGER PRIMARY KEY,
+    chat_id BIGINT PRIMARY KEY,
     message TEXT,
     buttons TEXT
 )
@@ -55,7 +55,12 @@ async def set_welcome(event):
     # बटन डेटा को SQL में स्टोर करने के लिए फॉर्मेट करना
     button_data = "|".join(f"{text}~{url}" for text, url in buttons)
 
-    cursor.execute("INSERT OR REPLACE INTO welcome_messages (chat_id, message, buttons) VALUES (?, ?, ?)", (chat_id, welcome_text, button_data))
+    cursor.execute("""
+        INSERT INTO welcome_messages (chat_id, message, buttons) 
+        VALUES (%s, %s, %s)
+        ON CONFLICT (chat_id) DO UPDATE 
+        SET message = EXCLUDED.message, buttons = EXCLUDED.buttons
+    """, (chat_id, welcome_text, button_data))
     conn.commit()
 
     await event.respond("Welcome message and buttons set successfully!")
@@ -69,7 +74,7 @@ async def welcome_new_member(event):
         chat = await event.get_chat()
 
         # SQL से वेलकम मैसेज और बटन लाना
-        cursor.execute("SELECT message, buttons FROM welcome_messages WHERE chat_id = ?", (chat_id,))
+        cursor.execute("SELECT message, buttons FROM welcome_messages WHERE chat_id = %s", (chat_id,))
         data = cursor.fetchone()
 
         if data:
