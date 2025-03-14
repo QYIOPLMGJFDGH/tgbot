@@ -4,7 +4,8 @@ import time
 import json
 from textblob import TextBlob
 from telegram import Update
-from telegram.ext import Updater, CommandHandler, MessageHandler, Filters, CallbackContext
+from telegram.ext import Application, CommandHandler, MessageHandler
+from telegram.ext.filters import TEXT, COMMAND
 
 # 🔑 API Keys
 OPENAI_API_KEY = "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"
@@ -73,38 +74,36 @@ def chat_with_gpt(user_id, user_message):
     return bot_reply
 
 # 🔄 Reset Chat Memory
-def reset_chat(update: Update, context: CallbackContext):
+async def reset_chat(update: Update, context):
     user_id = update.message.chat_id
     redis_client.delete(f"chat:{user_id}")
-    update.message.reply_text("Maine purani baatein bhool gayi, ab naye tareeke se shuru kar sakte hain!")
+    await update.message.reply_text("Maine purani baatein bhool gayi, ab naye tareeke se shuru kar sakte hain!")
 
 # 💬 Handle Messages & Simulate Typing
-def handle_message(update: Update, context: CallbackContext):
+async def handle_message(update: Update, context):
     user_id = update.message.chat_id
     user_message = update.message.text
 
     # ⏳ Typing Simulation
-    update.message.reply_chat_action("typing")
+    await update.message.chat.send_action("typing")
     time.sleep(min(len(user_message) * 0.1, 3))  # Delay based on message length
 
     # 🔥 Generate AI Response
     bot_reply = chat_with_gpt(user_id, user_message)
-    update.message.reply_text(bot_reply)
+    await update.message.reply_text(bot_reply)
 
 # 🏃‍♂️ Main Function to Run the Bot
 def main():
-    updater = Updater(TELEGRAM_BOT_TOKEN, use_context=True)
-    dp = updater.dispatcher
+    application = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
 
     # 🔧 Commands
-    dp.add_handler(CommandHandler("reset", reset_chat))
+    application.add_handler(CommandHandler("reset", reset_chat))
 
     # 💬 Messages
-    dp.add_handler(MessageHandler(Filters.text & ~Filters.command, handle_message))
+    application.add_handler(MessageHandler(TEXT & ~COMMAND, handle_message))
 
     # 🚀 Start Bot
-    updater.start_polling()
-    updater.idle()
+    application.run_polling()
 
 if __name__ == '__main__':
     main()
