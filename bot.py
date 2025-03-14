@@ -7,7 +7,7 @@ from telegram import Update
 from telegram.ext import Updater, CommandHandler, MessageHandler, Filters, CallbackContext
 
 # 🔑 API Keys
-OPENAI_API_KEY = "your_openai_api_key"
+OPENAI_API_KEY = "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"
 TELEGRAM_BOT_TOKEN = "8052771146:AAFQ_P-n9zOYdQqgU8uNsRMOlPx_GXrUy2Y"
 
 # 🔗 OpenAI API Setup
