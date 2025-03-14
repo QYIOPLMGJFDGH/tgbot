@@ -4,15 +4,14 @@ import time
 import json
 from textblob import TextBlob
 from telegram import Update
-from telegram.ext import Application, CommandHandler, MessageHandler
-from telegram.ext.filters import TEXT, COMMAND
+from telegram.ext import Application, CommandHandler, MessageHandler, filters
 
 # 🔑 API Keys
 OPENAI_API_KEY = "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"
 TELEGRAM_BOT_TOKEN = "8052771146:AAFQ_P-n9zOYdQqgU8uNsRMOlPx_GXrUy2Y"
 
 # 🔗 OpenAI API Setup
-openai.api_key = OPENAI_API_KEY
+client = openai.OpenAI(api_key=OPENAI_API_KEY)
 
 # 🔥 Redis Setup for Context Memory
 redis_client = redis.Redis(host='localhost', port=6379, db=0, decode_responses=True)
@@ -59,13 +58,13 @@ def chat_with_gpt(user_id, user_message):
     # 👤 Add User Message to Context
     chat_history.append({"role": "user", "content": user_message})
 
-    # 🤖 Generate AI Response
-    response = openai.ChatCompletion.create(
+    # ✅ New OpenAI API Syntax
+    response = client.chat.completions.create(
         model="gpt-4",
         messages=chat_history
     )
-    
-    bot_reply = response["choices"][0]["message"]["content"]
+
+    bot_reply = response.choices[0].message.content
 
     # 💾 Store Updated Chat History
     chat_history.append({"role": "assistant", "content": bot_reply})
@@ -100,7 +99,7 @@ def main():
     application.add_handler(CommandHandler("reset", reset_chat))
 
     # 💬 Messages
-    application.add_handler(MessageHandler(TEXT & ~COMMAND, handle_message))
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
     # 🚀 Start Bot
     application.run_polling()
