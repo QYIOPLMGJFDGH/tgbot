@@ -1,94 +1,110 @@
-from telethon import TelegramClient, events, Button
-import psycopg2
+import openai
+import redis
+import time
+import json
+from textblob import TextBlob
+from telegram import Update
+from telegram.ext import Updater, CommandHandler, MessageHandler, Filters, CallbackContext
 
-# अपने SQL डेटाबेस का URL यहाँ डालें
-DATABASE_URL = "postgres://kfcdtwea:jxgqtvc1ji7lSMjAhUp0QbxrE8Ut0t7N@fanny.db.elephantsql.com/kfcdtwea"
+# 🔑 API Keys
+OPENAI_API_KEY = "your_openai_api_key"
+TELEGRAM_BOT_TOKEN = "8052771146:AAFQ_P-n9zOYdQqgU8uNsRMOlPx_GXrUy2Y"
 
-# Telethon Client Configuration
-API_ID = 16457832  # अपना API ID डालें
-API_HASH = "3030874d0befdb5d05597deacc3e83ab"  # अपना API HASH डालें
-BOT_TOKEN = "8052771146:AAFQ_P-n9zOYdQqgU8uNsRMOlPx_GXrUy2Y"  # अपना बॉट टोकन डालें
+# 🔗 OpenAI API Setup
+openai.api_key = OPENAI_API_KEY
 
-client = TelegramClient('bot', API_ID, API_HASH).start(bot_token=BOT_TOKEN)
+# 🔥 Redis Setup for Context Memory
+redis_client = redis.Redis(host='localhost', port=6379, db=0, decode_responses=True)
 
-# SQL Database Connection (PostgreSQL)
-conn = psycopg2.connect(DATABASE_URL, sslmode="require")
-cursor = conn.cursor()
+# 🎭 Personality Responses
+PERSONALITIES = {
+    "casual": "Tum ek dost ho jo mazak masti karta hai, halka phulka aur friendly tone mein baat karta hai.",
+    "serious": "Tum ek samajhdar aur insightful insaan ho jo hamesha logical aur thoughtful jawab deta hai.",
+    "sarcastic": "Tum thoda sarcastic ho aur har baat pe halka phulka taunt ya masti karte ho.",
+    "flirty": "Tum thoda fun aur playful ho, thodi masti aur lighthearted tareeke se baat karte ho."
+}
 
-# वेलकम मैसेज और बटन टेबल बनाना
-cursor.execute("""
-CREATE TABLE IF NOT EXISTS welcome_messages (
-    chat_id BIGINT PRIMARY KEY,
-    message TEXT,
-    buttons TEXT
-)
-""")
-conn.commit()
-
-# /setwelcome कमांड हैंडलर
-@client.on(events.NewMessage(pattern='/setwelcome'))
-async def set_welcome(event):
-    chat_id = event.chat_id
-
-    await event.respond("Please send your welcome message. You can use:\n\n{name} - User's Name\n{username} - Username\n{chatname} - Group Name")
+# 🧠 Function to Detect Message Tone
+def detect_mood(message):
+    blob = TextBlob(message)
+    polarity = blob.sentiment.polarity  # -1 (negative) to +1 (positive)
     
-    response = await client.wait_for(events.NewMessage(from_users=event.sender_id, chats=chat_id))
-    welcome_text = response.text
+    if "😂" in message or "🤣" in message or any(word in message.lower() for word in ["lol", "haha", "masti", "mazaak"]):
+        return "casual"
+    elif "😡" in message or "😭" in message or any(word in message.lower() for word in ["gussa", "dukhi", "sad", "depressed"]):
+        return "serious"
+    elif "😉" in message or "😘" in message or any(word in message.lower() for word in ["cute", "sweet", "jaan", "baby"]):
+        return "flirty"
+    elif polarity < -0.3:
+        return "sarcastic"
+    elif polarity > 0.3:
+        return "casual"
+    else:
+        return "serious"
 
-    await event.respond("Do you want to add buttons? (yes/no)")
-    response = await client.wait_for(events.NewMessage(from_users=event.sender_id, chats=chat_id))
+# ✨ Function to Generate Realistic Replies
+def chat_with_gpt(user_id, user_message):
+    # 🧠 Detect User Mood
+    mood = detect_mood(user_message)
+    
+    # 🔥 Fetch Previous Chat History
+    chat_history = redis_client.get(f"chat:{user_id}")
+    
+    if chat_history:
+        chat_history = json.loads(chat_history)
+    else:
+        chat_history = [{"role": "system", "content": PERSONALITIES[mood]}]
 
-    buttons = []
-    if response.text.lower() == "yes":
-        await event.respond("Please send your buttons in format:\nText - URL\nSend one button per message. Send 'done' when finished.")
-        
-        while True:
-            btn_response = await client.wait_for(events.NewMessage(from_users=event.sender_id, chats=chat_id))
-            if btn_response.text.lower() == "done":
-                break
-            try:
-                text, url = btn_response.text.split(" - ", 1)
-                buttons.append((text, url))
-            except ValueError:
-                await event.respond("Invalid format. Please use: Text - URL")
+    # 👤 Add User Message to Context
+    chat_history.append({"role": "user", "content": user_message})
 
-    # बटन डेटा को SQL में स्टोर करने के लिए फॉर्मेट करना
-    button_data = "|".join(f"{text}~{url}" for text, url in buttons)
+    # 🤖 Generate AI Response
+    response = openai.ChatCompletion.create(
+        model="gpt-4",
+        messages=chat_history
+    )
+    
+    bot_reply = response["choices"][0]["message"]["content"]
 
-    cursor.execute("""
-        INSERT INTO welcome_messages (chat_id, message, buttons) 
-        VALUES (%s, %s, %s)
-        ON CONFLICT (chat_id) DO UPDATE 
-        SET message = EXCLUDED.message, buttons = EXCLUDED.buttons
-    """, (chat_id, welcome_text, button_data))
-    conn.commit()
+    # 💾 Store Updated Chat History
+    chat_history.append({"role": "assistant", "content": bot_reply})
+    redis_client.set(f"chat:{user_id}", json.dumps(chat_history))
 
-    await event.respond("Welcome message and buttons set successfully!")
+    return bot_reply
 
-# New Member Join Handler
-@client.on(events.ChatAction)
-async def welcome_new_member(event):
-    if event.user_joined or event.user_added:
-        chat_id = event.chat_id
-        user = await event.get_user()
-        chat = await event.get_chat()
+# 🔄 Reset Chat Memory
+def reset_chat(update: Update, context: CallbackContext):
+    user_id = update.message.chat_id
+    redis_client.delete(f"chat:{user_id}")
+    update.message.reply_text("Maine purani baatein bhool gayi, ab naye tareeke se shuru kar sakte hain!")
 
-        # SQL से वेलकम मैसेज और बटन लाना
-        cursor.execute("SELECT message, buttons FROM welcome_messages WHERE chat_id = %s", (chat_id,))
-        data = cursor.fetchone()
+# 💬 Handle Messages & Simulate Typing
+def handle_message(update: Update, context: CallbackContext):
+    user_id = update.message.chat_id
+    user_message = update.message.text
 
-        if data:
-            message, button_data = data
-            formatted_message = message.format(name=user.first_name, username=f"@{user.username}" if user.username else "N/A", chatname=chat.title)
+    # ⏳ Typing Simulation
+    update.message.reply_chat_action("typing")
+    time.sleep(min(len(user_message) * 0.1, 3))  # Delay based on message length
 
-            # बटन बनाने की प्रक्रिया
-            buttons = []
-            if button_data:
-                for btn in button_data.split("|"):
-                    text, url = btn.split("~", 1)
-                    buttons.append([Button.url(text, url)])
+    # 🔥 Generate AI Response
+    bot_reply = chat_with_gpt(user_id, user_message)
+    update.message.reply_text(bot_reply)
 
-            # वेलकम मैसेज भेजना
-            await client.send_message(chat_id, formatted_message, buttons=buttons if buttons else None)
+# 🏃‍♂️ Main Function to Run the Bot
+def main():
+    updater = Updater(TELEGRAM_BOT_TOKEN, use_context=True)
+    dp = updater.dispatcher
 
-client.run_until_disconnected()
+    # 🔧 Commands
+    dp.add_handler(CommandHandler("reset", reset_chat))
+
+    # 💬 Messages
+    dp.add_handler(MessageHandler(Filters.text & ~Filters.command, handle_message))
+
+    # 🚀 Start Bot
+    updater.start_polling()
+    updater.idle()
+
+if __name__ == '__main__':
+    main()
