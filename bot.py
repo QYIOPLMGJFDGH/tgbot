@@ -60,7 +60,7 @@ def chat_with_gpt(user_id, user_message):
 
     # ✅ New OpenAI API Syntax
     response = client.chat.completions.create(
-        model="gpt-4",
+        model="gpt-4-turbo",
         messages=chat_history
     )
 
